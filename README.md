@@ -280,7 +280,7 @@ A: 目前需要手动编辑 YAML 文件，或者重新运行向导创建新配�
 
 如果这个项目对您有帮助，请给我们一个 Star！
 
-[![Star History Chart](https://api.star-history.com/svg?repos=your-username/lis-extractor&type=Date)](https://star-history.com/#your-username/lis-extractor&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=xenorexq/lis-extractor&type=Date)](https://star-history.com/#xenorexq/lis-extractor&Date)
 
 ---
 
