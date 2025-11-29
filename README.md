@@ -273,9 +273,8 @@ A: 目前需要手动编辑 YAML 文件，或者重新运行向导创建新配�
 
 ## 联系方式 📧
 
-- 💬 [GitHub Issues](https://github.com/your-username/lis-extractor/issues)
-- 📧 Email: your-email@example.com
-- 🌐 项目主页: https://github.com/your-username/lis-extractor
+- 💬 [GitHub Issues](https://github.com/xenorexq/lis-extractor/issues)
+- 🌐 项目主页: https://github.com/xenorexq/lis-extractor
 
 ## Star History ⭐
 
