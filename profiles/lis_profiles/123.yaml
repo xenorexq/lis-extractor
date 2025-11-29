@@ -1,0 +1,64 @@
+id: '123'
+description: ''
+created_at: '2025-11-29 21:10:22'
+signature:
+  required_columns:
+  - 报告时间
+  - 病人号
+  - 项目名称
+  - 检验结果
+  - 单位
+  min_match_ratio: 0.75
+  skip_top_rows: 3
+column_mapping:
+  sample_datetime: 报告时间
+  patient_id: 病人号
+  test_name: 项目名称
+  test_value: 检验结果
+  unit: 单位
+test_mapping:
+  '*乳酸脱氢酶':
+    aliases:
+    - '*乳酸脱氢酶'
+    unit: null
+    range: null
+  '*碱性磷酸酶':
+    aliases:
+    - '*碱性磷酸酶'
+    unit: null
+    range: null
+  '*白蛋白':
+    aliases:
+    - '*白蛋白'
+    unit: null
+    range: null
+  球蛋白:
+    aliases:
+    - 球蛋白
+    unit: null
+    range: null
+  '*谷草转氨酶':
+    aliases:
+    - '*谷草转氨酶'
+    unit: null
+    range: null
+  '*谷丙转氨酶':
+    aliases:
+    - '*谷丙转氨酶'
+    unit: null
+    range: null
+value_parsing:
+  less_than:
+    rule: half
+  greater_than:
+    rule: keep
+  positive_text:
+    mapping: {}
+  negative_text:
+    mapping:
+      阴性(-): 0
+  invalid_values:
+    mapping: {}
+output_options:
+  drop_unknown_tests: true
+  drop_failed_rows: false
