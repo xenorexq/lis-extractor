@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ProfileManager:
     """
@@ -38,7 +42,7 @@ class ProfileManager:
                     'created_time': datetime.fromtimestamp(file_path.stat().st_ctime)
                 })
             except Exception as e:
-                print(f"读取 profile 失败 {file_path}: {e}")
+                logger.warning(f"读取 profile 失败 {file_path}: {e}")
         
         # 按创建时间排序
         profiles.sort(key=lambda x: x['created_time'], reverse=True)
@@ -56,7 +60,7 @@ class ProfileManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            print(f"加载 profile 失败: {e}")
+            logger.error(f"加载 profile 失败: {e}")
             return None
     
     def save_profile(self, profile: Dict) -> str:

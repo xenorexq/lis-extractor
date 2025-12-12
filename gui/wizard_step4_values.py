@@ -1,16 +1,70 @@
 """
 向导 Step 4: 数值解析规则
 """
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QGroupBox, QRadioButton, QButtonGroup, QLineEdit,
                              QTableWidget, QTableWidgetItem, QComboBox,
-                             QMessageBox, QScrollArea)
-from PyQt6.QtCore import pyqtSignal, Qt
+                             QMessageBox, QScrollArea, QProgressDialog, QApplication)
+from PyQt6.QtCore import pyqtSignal, Qt, QThread
 import pandas as pd
 
 from core import ValueParser, ColumnMapper
 from .components import NavigationButtons
 from core.utils import detect_special_value_patterns, detect_value_formats
+
+
+class ValueAnalysisThread(QThread):
+    """后台执行值格式检测的线程"""
+    finished = pyqtSignal(dict, dict)  # (special_patterns, format_info)
+    progress = pyqtSignal(int, str)  # (percentage, message)
+    error = pyqtSignal(str)
+
+    def __init__(self, df_preview: pd.DataFrame, mapper):
+        super().__init__()
+        self.df_preview = df_preview
+        self.mapper = mapper
+        self._is_cancelled = False
+
+    def cancel(self):
+        """取消操作"""
+        self._is_cancelled = True
+
+    def run(self):
+        """执行值格式分析"""
+        try:
+            self.progress.emit(10, "应用字段映射...")
+
+            if self._is_cancelled:
+                return
+
+            # 应用映射
+            df_mapped = self.mapper.apply(self.df_preview)
+
+            if 'test_value' not in df_mapped.columns:
+                self.finished.emit({}, {})
+                return
+
+            self.progress.emit(30, "检测特殊值模式...")
+
+            if self._is_cancelled:
+                return
+
+            # 检测特殊值模式
+            special_patterns = detect_special_value_patterns(df_mapped['test_value'])
+
+            self.progress.emit(60, "分析数值格式分布...")
+
+            if self._is_cancelled:
+                return
+
+            # 检测数值格式分布
+            format_info = detect_value_formats(df_mapped['test_value'])
+
+            self.progress.emit(100, "分析完成")
+            self.finished.emit(special_patterns, format_info)
+
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class WizardStep4Values(QWidget):
@@ -26,7 +80,11 @@ class WizardStep4Values(QWidget):
         self.df_preview = None
         self.mapper = None
         self.special_patterns = {}
-        
+
+        # 线程和进度对话框
+        self.analysis_thread = None
+        self.progress_dialog = None
+
         self.init_ui()
     
     def init_ui(self):
@@ -161,43 +219,96 @@ class WizardStep4Values(QWidget):
         self.setLayout(layout)
     
     def load_data(self, data: dict):
-        """加载数据并分析特殊值"""
+        """加载数据并分析特殊值（使用后台线程）"""
         self.df_preview = data['df_preview']
         self.mapper = data['mapper']
-        
-        # 应用映射
-        df_mapped = self.mapper.apply(self.df_preview)
-        
-        if 'test_value' not in df_mapped.columns:
-            return
-        
-        # 检测特殊值模式
-        self.special_patterns = detect_special_value_patterns(df_mapped['test_value'])
-        
-        # 检测数值格式分布
-        format_info = detect_value_formats(df_mapped['test_value'])
-        self._update_format_preview(format_info)
-        
+
+        # 显示加载状态
+        self.format_stats_label.setText("正在分析数据格式...")
+
+        # 创建进度对话框
+        self.progress_dialog = QProgressDialog(
+            "正在分析数值格式...",
+            "取消",
+            0, 100,
+            self
+        )
+        self.progress_dialog.setWindowTitle("数值分析")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.canceled.connect(self._on_analysis_cancelled)
+
+        # 创建并启动后台线程
+        self.analysis_thread = ValueAnalysisThread(self.df_preview, self.mapper)
+        self.analysis_thread.progress.connect(self._on_analysis_progress)
+        self.analysis_thread.finished.connect(self._on_analysis_finished)
+        self.analysis_thread.error.connect(self._on_analysis_error)
+        self.analysis_thread.start()
+
+    def _on_analysis_progress(self, percentage: int, message: str):
+        """处理分析进度更新"""
+        if self.progress_dialog and not self.progress_dialog.wasCanceled():
+            self.progress_dialog.setValue(percentage)
+            self.progress_dialog.setLabelText(message)
+            QApplication.processEvents()
+
+    def _on_analysis_cancelled(self):
+        """处理用户取消分析"""
+        self._cleanup_thread()
+        self.format_stats_label.setText("分析已取消")
+
+    def _cleanup_thread(self):
+        """清理线程资源"""
+        if self.analysis_thread:
+            if self.analysis_thread.isRunning():
+                self.analysis_thread.cancel()
+                self.analysis_thread.quit()
+                self.analysis_thread.wait(2000)
+            self.analysis_thread = None
+
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+
+    def _on_analysis_finished(self, special_patterns: dict, format_info: dict):
+        """处理分析完成"""
+        # 清理线程和进度对话框
+        self._cleanup_thread()
+
+        self.special_patterns = special_patterns
+
+        # 更新格式预览
+        if format_info:
+            self._update_format_preview(format_info)
+
         # 更新示例显示
-        if self.special_patterns['less_than']:
+        if self.special_patterns.get('less_than'):
             examples = ', '.join(self.special_patterns['less_than'][:5])
             self.less_examples_label.setText(f"示例: {examples}")
-        
-        if self.special_patterns['greater_than']:
+
+        if self.special_patterns.get('greater_than'):
             examples = ', '.join(self.special_patterns['greater_than'][:5])
             self.greater_examples_label.setText(f"示例: {examples}")
-        
-        if self.special_patterns['positive']:
+
+        if self.special_patterns.get('positive'):
             examples = ', '.join(self.special_patterns['positive'][:5])
             self.positive_examples_label.setText(f"阳性示例: {examples}")
-        
-        if self.special_patterns['negative']:
+
+        if self.special_patterns.get('negative'):
             examples = ', '.join(self.special_patterns['negative'][:5])
             self.negative_examples_label.setText(f"阴性示例: {examples}")
-        
-        if self.special_patterns['invalid']:
+
+        if self.special_patterns.get('invalid'):
             examples = ', '.join(self.special_patterns['invalid'][:10])
             self.invalid_examples_label.setText(f"示例: {examples}")
+
+    def _on_analysis_error(self, error_msg: str):
+        """处理分析错误"""
+        # 清理线程和进度对话框
+        self._cleanup_thread()
+
+        self.format_stats_label.setText(f"⚠️ 分析失败: {error_msg}")
     
     def _update_format_preview(self, format_info: dict):
         """更新格式预览显示"""

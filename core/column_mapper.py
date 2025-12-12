@@ -3,6 +3,7 @@
 将原始列映射为标准字段
 """
 import pandas as pd
+import re
 from typing import Dict, List, Optional
 
 
@@ -24,6 +25,7 @@ class ColumnMapper:
         'result_flag',      # 结果标志（H/L等）
         'department',       # 科室
         'diagnosis',        # 诊断
+        'I just want it',             # I Just Want It (多选，直接导出)
         'ignore'            # 忽略此列
     ]
     
@@ -35,7 +37,14 @@ class ColumnMapper:
         例如: {'patient_id': '病人ID', 'test_name': '项目名称'}
         """
         self.mapping = mapping
-        self.reverse_mapping = {v: k for k, v in mapping.items() if v}
+        self.reverse_mapping = {}
+        for k, v in mapping.items():
+            if v:
+                if isinstance(v, list):
+                    for col in v:
+                        self.reverse_mapping[col] = k
+                else:
+                    self.reverse_mapping[v] = k
     
     def validate(self) -> tuple:
         """
@@ -49,6 +58,19 @@ class ColumnMapper:
         
         return len(missing) == 0, list(missing)
     
+    def _make_ijwi_column_name(self, col_name: str) -> str:
+        """
+        为 I just want it 列生成标准化列名
+
+        Args:
+            col_name: 原始列名
+
+        Returns:
+            格式化后的列名，如 ijwi_原始列名
+        """
+        safe_col_name = re.sub(r'[^\w\u4e00-\u9fff]', '_', str(col_name))
+        return f"ijwi_{safe_col_name}"
+
     def apply(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         应用映射到 DataFrame
@@ -56,16 +78,33 @@ class ColumnMapper:
         """
         # 只保留映射的列
         columns_to_keep = [col for col in df.columns if col in self.reverse_mapping]
-        
+
         df_mapped = df[columns_to_keep].copy()
-        
+
         # 重命名
-        rename_dict = {orig_col: std_field 
-                      for std_field, orig_col in self.mapping.items() 
-                      if orig_col in df.columns and std_field != 'ignore'}
-        
+        rename_dict = {}
+
+        for std_field, orig_col in self.mapping.items():
+            if std_field == 'ignore':
+                continue
+
+            # 统一处理：将单列转换为列表
+            cols = orig_col if isinstance(orig_col, list) else [orig_col]
+
+            for i, col in enumerate(cols):
+                if col not in df.columns:
+                    continue
+
+                if std_field == 'I just want it':
+                    rename_dict[col] = self._make_ijwi_column_name(col)
+                elif len(cols) > 1 and i > 0:
+                    # 多列映射的第2个及以后的列
+                    rename_dict[col] = f"{std_field}_{i+1}"
+                else:
+                    rename_dict[col] = std_field
+
         df_mapped = df_mapped.rename(columns=rename_dict)
-        
+
         return df_mapped
     
     def get_example_values(self, df: pd.DataFrame, n: int = 3) -> Dict[str, List]:
@@ -117,10 +156,10 @@ class ColumnMapper:
     
     def to_dict(self) -> Dict:
         """转为字典（用于保存到 YAML）"""
-        return {k: v for k, v in self.mapping.items() if v and k != 'ignore'}
+        # 过滤掉'ignore'，但保留I just want it和其他有效字段
+        return {k: v for k, v in self.mapping.items() if v and k not in ['ignore']}
     
     @classmethod
     def from_dict(cls, mapping_dict: Dict) -> 'ColumnMapper':
         """从字典创建（用于从 YAML 加载）"""
         return cls(mapping_dict)
-

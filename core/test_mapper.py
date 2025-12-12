@@ -31,7 +31,7 @@ class TestMapper:
         for standard_name, config in self.test_mapping.items():
             aliases = config.get('aliases', [])
             for alias in aliases:
-                self.alias_to_standard[alias.lower()] = standard_name
+                self.alias_to_standard[alias.strip().lower()] = standard_name
     
     def standardize_test_name(self, raw_name: str) -> str:
         """

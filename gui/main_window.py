@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSlot
 import os
 
-from core import ProfileManager, ExtractorEngine, ExtractorThread
+from core import ProfileManager, ExtractorEngine, ExtractorThread, UserMessage
 from .wizard_dialog import WizardDialog
 from .components import ProgressPanel, LogViewer
 
@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
         
         about_text = """
         <h2>LIS Extractor</h2>
-        <p><b>版本:</b> 1.0.0</p>
+        <p><b>版本:</b> 1.1.0</p>
         <p><b>描述:</b> 医院检验数据标准化抽取工具</p>
         <br>
         <h3>功能特性</h3>
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         <br>
         <h3>版权信息</h3>
         <p><b>许可协议:</b> MIT License</p>
-        <p><b>版权所有:</b> © 2024 LIS Extractor Contributors</p>
+        <p><b>版权所有:</b> © 2025 LIS Extractor Contributors</p>
         <p>本软件为开源软件，遵循 MIT 许可协议。您可以自由使用、修改和分发本软件。</p>
         <br>
         <p><b>GitHub:</b> <a href="https://github.com/xenorexq/lis-extractor">https://github.com/xenorexq/lis-extractor</a></p>
@@ -282,7 +282,11 @@ class MainWindow(QMainWindow):
             self.output_edit.setText(result.get('output_dir', ''))
             
             # 自动开始抽取
-            QMessageBox.information(self, "提示", "Profile 已创建，即将开始抽取数据...")
+            QMessageBox.information(
+                self,
+                UserMessage.Type.INFO,
+                "Profile 已创建，即将开始抽取数据..."
+            )
             self.start_extraction()
     
     def refresh_profiles(self):
@@ -383,7 +387,16 @@ class MainWindow(QMainWindow):
         output_dir = self.output_edit.text()
         
         if not profile_id or not input_path:
-            QMessageBox.warning(self, "提示", "请选择配置和输入文件")
+            QMessageBox.warning(
+                self,
+                UserMessage.Type.WARNING,
+                UserMessage.format_validation_error(
+                    ["配置", "输入文件"] if not profile_id and not input_path
+                    else ["配置"] if not profile_id
+                    else ["输入文件"],
+                    "项"
+                )
+            )
             return
         
         # 获取 profile 路径
@@ -423,11 +436,14 @@ class MainWindow(QMainWindow):
         """取消抽取"""
         if self.extractor_engine:
             self.extractor_engine.cancel()
-        
+
         if self.extractor_thread:
             self.extractor_thread.quit()
-            self.extractor_thread.wait()
-        
+            self.extractor_thread.wait(5000)  # 等待最多5秒
+            self.extractor_thread = None  # 清理引用，防止内存泄漏
+
+        self.extractor_engine = None  # 清理引用
+
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.progress_panel.reset()
@@ -445,23 +461,45 @@ class MainWindow(QMainWindow):
     @pyqtSlot(dict)
     def on_extraction_finished(self, result: dict):
         """抽取完成"""
+        # 清理线程资源
+        self._cleanup_thread()
+
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        
+
         QMessageBox.information(
             self,
-            "完成",
-            f"数据抽取完成!\n\n"
-            f"输出目录: {result['output_dir']}\n"
-            f"数据行数: {result['total_rows']}\n"
-            f"检验项目: {result['total_tests']}"
+            UserMessage.format_title(UserMessage.Action.EXPORT, UserMessage.Type.SUCCESS),
+            UserMessage.format_success(
+                "数据抽取",
+                f"输出目录: {result['output_dir']}\n"
+                f"数据行数: {result['total_rows']}\n"
+                f"检验项目: {result['total_tests']}"
+            )
         )
     
     @pyqtSlot(str)
     def on_extraction_error(self, error_msg: str):
         """抽取出错"""
+        # 清理线程资源
+        self._cleanup_thread()
+
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        
-        QMessageBox.critical(self, "错误", f"抽取失败:\n{error_msg}")
+
+        QMessageBox.critical(
+            self,
+            UserMessage.format_title(UserMessage.Action.PROCESS, UserMessage.Type.ERROR),
+            UserMessage.format_error("完成数据抽取", error_msg)
+        )
+
+    def _cleanup_thread(self):
+        """清理线程资源"""
+        if self.extractor_thread:
+            if self.extractor_thread.isRunning():
+                self.extractor_thread.quit()
+                self.extractor_thread.wait(3000)
+            self.extractor_thread = None
+
+        self.extractor_engine = None
 

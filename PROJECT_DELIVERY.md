@@ -301,7 +301,7 @@ python3 run.py
 
 ---
 
-**交付日期**：2024  
+**交付日期**：2025
 **开发工具**：Cursor AI Agent  
 **技术栈**：Python 3.10+, PyQt6, pandas  
 **代码行数**：约 3000+ 行  

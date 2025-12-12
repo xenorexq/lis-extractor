@@ -71,7 +71,7 @@ def parse_datetime(value: Any) -> Optional[datetime]:
     if hasattr(value, 'date'):
         try:
             return datetime.combine(value.date(), datetime.min.time())
-        except:
+        except (TypeError, AttributeError, ValueError):
             pass
     
     if isinstance(value, str):
@@ -95,13 +95,13 @@ def parse_datetime(value: Any) -> Optional[datetime]:
         for fmt in formats:
             try:
                 return datetime.strptime(value, fmt)
-            except:
+            except (ValueError, TypeError):
                 continue
         
         # 尝试使用 pandas 的智能解析
         try:
             return pd.to_datetime(value, errors='coerce').to_pydatetime()
-        except:
+        except (ValueError, TypeError, AttributeError):
             pass
     
     # 尝试直接转换为 pandas datetime
@@ -109,7 +109,7 @@ def parse_datetime(value: Any) -> Optional[datetime]:
         dt = pd.to_datetime(value, errors='coerce')
         if pd.notna(dt):
             return dt.to_pydatetime()
-    except:
+    except (ValueError, TypeError, AttributeError):
         pass
     
     return None
@@ -147,7 +147,7 @@ def extract_numeric(value: str) -> Optional[float]:
     # 例如: "1.5e-3", "2E+5", "123.45"
     try:
         return float(value_str)
-    except:
+    except (ValueError, TypeError):
         pass
     
     # 2. 处理幂表示法: 10^3 → 1000
@@ -158,7 +158,7 @@ def extract_numeric(value: str) -> Optional[float]:
                 base = float(match.group(1))
                 exp = float(match.group(2))
                 return base ** exp
-            except:
+            except (ValueError, TypeError, OverflowError):
                 pass
     
     # 3. 处理滴度: 1:128 → 128 (通常关注滴度值)
@@ -167,7 +167,7 @@ def extract_numeric(value: str) -> Optional[float]:
         if len(parts) == 2:
             try:
                 return float(parts[1].strip())  # 返回冒号后的数值
-            except:
+            except (ValueError, TypeError):
                 pass
     
     # 4. 处理区间: 1.5-2.0 → 1.75 (取中值)
@@ -180,7 +180,7 @@ def extract_numeric(value: str) -> Optional[float]:
                 lower = float(match.group(1))
                 upper = float(match.group(2))
                 return (lower + upper) / 2  # 取中值
-            except:
+            except (ValueError, TypeError):
                 pass
     
     # 5. 移除常见符号后提取数字
@@ -192,7 +192,7 @@ def extract_numeric(value: str) -> Optional[float]:
     if match:
         try:
             return float(match.group())
-        except:
+        except (ValueError, TypeError):
             return None
     
     return None
@@ -355,7 +355,7 @@ def detect_value_formats(series: pd.Series, max_samples: int = 100) -> dict:
             format_counts['normal'] += 1
             if len(format_samples['normal']) < 3:
                 format_samples['normal'].append(val_str)
-        except:
+        except (ValueError, TypeError):
             # 无法识别
             format_counts['invalid'] += 1
             if len(format_samples['invalid']) < 3:

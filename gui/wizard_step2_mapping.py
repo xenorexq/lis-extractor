@@ -1,15 +1,60 @@
 """
 向导 Step 2: 字段映射
 """
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTableWidget, QTableWidgetItem, QComboBox,
                              QGroupBox, QMessageBox, QCheckBox, QPushButton,
-                             QHeaderView)
-from PyQt6.QtCore import pyqtSignal, Qt
+                             QHeaderView, QProgressDialog, QApplication)
+from PyQt6.QtCore import pyqtSignal, Qt, QThread
 import pandas as pd
 
-from core import ColumnMapper
+from core import ColumnMapper, UserMessage
 from .components import NavigationButtons
+
+
+class AutoMappingThread(QThread):
+    """后台执行自动映射建议的线程"""
+    finished = pyqtSignal(dict)  # {standard_field: original_column}
+    progress = pyqtSignal(int, str)  # (percentage, message)
+    error = pyqtSignal(str)
+
+    def __init__(self, columns: list, df_preview: pd.DataFrame):
+        super().__init__()
+        self.columns = columns
+        self.df_preview = df_preview
+        self._is_cancelled = False
+
+    def cancel(self):
+        """取消操作"""
+        self._is_cancelled = True
+
+    def run(self):
+        """执行自动映射建议"""
+        try:
+            self.progress.emit(10, "分析列名...")
+
+            if self._is_cancelled:
+                return
+
+            # 调用 ColumnMapper 的建议方法
+            suggestions = ColumnMapper.suggest_mapping(self.columns)
+
+            self.progress.emit(50, "匹配标准字段...")
+
+            if self._is_cancelled:
+                return
+
+            # 进一步分析示例值来优化建议
+            self.progress.emit(80, "分析示例数据...")
+
+            if self._is_cancelled:
+                return
+
+            self.progress.emit(100, "完成")
+            self.finished.emit(suggestions)
+
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class WizardStep2Mapping(QWidget):
@@ -25,7 +70,11 @@ class WizardStep2Mapping(QWidget):
         self.df_preview = None
         self.column_examples = {}
         self.mapping_combos = {}
-        
+
+        # 线程和进度对话框
+        self.mapping_thread = None
+        self.progress_dialog = None
+
         self.init_ui()
     
     def init_ui(self):
@@ -142,23 +191,95 @@ class WizardStep2Mapping(QWidget):
         self.mapping_table.itemChanged.connect(self.validate_mapping)
     
     def auto_suggest_mapping(self):
-        """自动建议映射"""
+        """自动建议映射（使用后台线程）"""
         columns = self.df_preview.columns.tolist()
-        suggestions = ColumnMapper.suggest_mapping(columns)
-        
+
+        # 禁用按钮
+        self.auto_suggest_btn.setEnabled(False)
+        self.auto_suggest_btn.setText("分析中...")
+
+        # 创建进度对话框
+        self.progress_dialog = QProgressDialog(
+            "正在分析列名和数据...",
+            "取消",
+            0, 100,
+            self
+        )
+        self.progress_dialog.setWindowTitle("自动映射")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.canceled.connect(self._on_mapping_cancelled)
+
+        # 创建并启动后台线程
+        self.mapping_thread = AutoMappingThread(columns, self.df_preview)
+        self.mapping_thread.progress.connect(self._on_mapping_progress)
+        self.mapping_thread.finished.connect(self._on_mapping_finished)
+        self.mapping_thread.error.connect(self._on_mapping_error)
+        self.mapping_thread.start()
+
+    def _on_mapping_progress(self, percentage: int, message: str):
+        """处理映射进度更新"""
+        if self.progress_dialog and not self.progress_dialog.wasCanceled():
+            self.progress_dialog.setValue(percentage)
+            self.progress_dialog.setLabelText(message)
+            QApplication.processEvents()
+
+    def _on_mapping_cancelled(self):
+        """处理用户取消映射"""
+        self._cleanup_thread()
+        self._reset_mapping_button()
+
+    def _cleanup_thread(self):
+        """清理线程资源"""
+        if self.mapping_thread:
+            if self.mapping_thread.isRunning():
+                self.mapping_thread.cancel()
+                self.mapping_thread.quit()
+                self.mapping_thread.wait(2000)
+            self.mapping_thread = None
+
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+
+    def _on_mapping_finished(self, suggestions: dict):
+        """处理映射完成"""
+        # 清理线程和进度对话框
+        self._cleanup_thread()
+
+        # 应用建议
         for col, combo in self.mapping_combos.items():
             suggested_field = None
             for field, suggested_col in suggestions.items():
                 if suggested_col == col:
                     suggested_field = field
                     break
-            
+
             if suggested_field:
                 index = combo.findText(suggested_field)
                 if index >= 0:
                     combo.setCurrentIndex(index)
-        
+
         self.validate_mapping()
+        self._reset_mapping_button()
+
+    def _on_mapping_error(self, error_msg: str):
+        """处理映射错误"""
+        # 清理线程和进度对话框
+        self._cleanup_thread()
+
+        QMessageBox.warning(
+            self,
+            UserMessage.format_title(UserMessage.Action.MAP, UserMessage.Type.ERROR),
+            UserMessage.format_error("自动映射字段", error_msg)
+        )
+        self._reset_mapping_button()
+
+    def _reset_mapping_button(self):
+        """重置自动映射按钮状态"""
+        self.auto_suggest_btn.setEnabled(True)
+        self.auto_suggest_btn.setText("🔍 自动建议映射")
     
     def select_all_columns(self):
         """全选所有列"""
@@ -186,7 +307,16 @@ class WizardStep2Mapping(QWidget):
             standard_field = combo.currentText()
             
             if standard_field != '(不映射)':
-                mapping[standard_field] = col_name
+                if standard_field == 'I just want it':
+                    if 'I just want it' in mapping:
+                        if isinstance(mapping['I just want it'], list):
+                            mapping['I just want it'].append(col_name)
+                        else:
+                            mapping['I just want it'] = [mapping['I just want it'], col_name]
+                    else:
+                        mapping['I just want it'] = col_name
+                else:
+                    mapping[standard_field] = col_name
         
         return mapping
     
@@ -213,7 +343,11 @@ class WizardStep2Mapping(QWidget):
         mapping = self.get_mapping()
         
         if not mapping:
-            QMessageBox.warning(self, "提示", "请至少映射一个字段")
+            QMessageBox.warning(
+                self,
+                UserMessage.Type.WARNING,
+                UserMessage.format_validation_error(["至少一个字段映射"], "")
+            )
             return
         
         # 验证必填字段
@@ -222,9 +356,9 @@ class WizardStep2Mapping(QWidget):
         
         if not is_valid:
             QMessageBox.warning(
-                self, 
-                "映射不完整", 
-                f"请映射以下必填字段:\n{', '.join(missing)}"
+                self,
+                UserMessage.format_title(UserMessage.Action.VALIDATE, UserMessage.Type.ERROR),
+                UserMessage.format_validation_error(missing, "字段")
             )
             return
         
@@ -235,8 +369,3 @@ class WizardStep2Mapping(QWidget):
         }
         
         self.next_step.emit(data)
-
-
-# 需要导入 QPushButton
-from PyQt6.QtWidgets import QPushButton
-

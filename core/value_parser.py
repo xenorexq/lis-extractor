@@ -3,10 +3,12 @@
 处理特殊格式的检验结果（<0.5, >1000, 阳性等）
 """
 import re
+import math
 import pandas as pd
 from typing import Optional, Dict, Any, Tuple
 
 from .utils import extract_numeric, safe_float
+from .constants import ParserConfig
 
 
 class ValueParser:
@@ -132,44 +134,66 @@ class ValueParser:
                 else:  # 'na'
                     return None, 'greater_than'
         
-        # 6. 检测特殊格式（用于标记）
+        # 6. 检测特殊格式（用于标记），同时进行边界值检查
         # 科学计数法
         if re.search(r'\d+\.?\d*[eE][-+]?\d+', value_str):
             numeric = extract_numeric(value_str)
             if numeric is not None:
-                return numeric, 'scientific'
-        
+                return self._validate_numeric(numeric, 'scientific')
+
         # 幂表示
         if '^' in value_str:
             numeric = extract_numeric(value_str)
             if numeric is not None:
-                return numeric, 'power'
-        
+                return self._validate_numeric(numeric, 'power')
+
         # 滴度
         if ':' in value_str and re.match(r'\d+:\d+', value_str):
             numeric = extract_numeric(value_str)
             if numeric is not None:
-                return numeric, 'titer'
-        
+                return self._validate_numeric(numeric, 'titer')
+
         # 区间
         if '-' in value_str and not value_str.startswith('-'):
             if re.match(r'^\d+\.?\d*\s*-\s*\d+\.?\d*$', value_str):
                 numeric = extract_numeric(value_str)
                 if numeric is not None:
-                    return numeric, 'range'
+                    return self._validate_numeric(numeric, 'range')
         
         # 7. 尝试直接转为数值
         numeric = safe_float(value_str.replace(',', ''))
         if numeric is not None:
-            return numeric, 'normal'
-        
+            return self._validate_numeric(numeric)
+
         # 8. 尝试提取数值
         numeric = extract_numeric(value_str)
         if numeric is not None:
-            return numeric, 'normal'
-        
+            return self._validate_numeric(numeric)
+
         # 9. 无法解析
         return None, 'invalid'
+
+    def _validate_numeric(self, numeric: float, original_flag: str = 'normal') -> Tuple[Optional[float], str]:
+        """
+        验证数值的合理性
+
+        Args:
+            numeric: 要验证的数值
+            original_flag: 原始格式标记（如 'scientific', 'power' 等）
+
+        Returns:
+            (validated_value, flag)
+        """
+        # 检查 inf 和 nan
+        if math.isinf(numeric) or math.isnan(numeric):
+            return None, 'invalid'
+
+        # 检查极端值
+        if abs(numeric) > ParserConfig.EXTREME_VALUE_THRESHOLD:
+            # 对于极端值，仍然返回但标记为 extreme
+            return numeric, 'extreme_value'
+
+        return numeric, original_flag
     
     def apply(self, df: pd.DataFrame, value_col: str = 'test_value') -> pd.DataFrame:
         """

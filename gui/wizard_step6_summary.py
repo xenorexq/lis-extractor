@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import pyqtSignal
 import os
 
-from core import ProfileManager
+from core import ProfileManager, UserMessage
 from .components import NavigationButtons
 
 
@@ -25,6 +25,16 @@ class WizardStep6Summary(QWidget):
         self.profile_manager = ProfileManager()
         
         self.init_ui()
+    
+    def _flatten_mapping_values(self, mapping: dict) -> list:
+        """展平mapping中的列表值，避免嵌套列表"""
+        result = []
+        for value in mapping.values():
+            if isinstance(value, list):
+                result.extend(value)
+            else:
+                result.append(value)
+        return result
     
     def init_ui(self):
         layout = QVBoxLayout()
@@ -152,7 +162,11 @@ class WizardStep6Summary(QWidget):
         # 验证 Profile ID
         profile_id = self.profile_id_edit.text().strip()
         if not profile_id:
-            QMessageBox.warning(self, "提示", "请输入 Profile ID")
+            QMessageBox.warning(
+                self,
+                UserMessage.Type.WARNING,
+                UserMessage.format_validation_error(["Profile ID"], "")
+            )
             return
         
         # 检查是否已存在
@@ -173,7 +187,7 @@ class WizardStep6Summary(QWidget):
             column_mapping=self.all_wizard_data.get('mapping', {}),
             test_mapping=self.all_wizard_data.get('test_mapping', {}),
             value_parsing=self.all_wizard_data.get('value_parsing', {}),
-            required_columns=list(self.all_wizard_data.get('mapping', {}).values()),
+            required_columns=self._flatten_mapping_values(self.all_wizard_data.get('mapping', {})),
             skip_top_rows=self.all_wizard_data.get('header_row', 0),
             output_options={
                 'drop_unknown_tests': self.all_wizard_data.get('output_options', {}).get('drop_unknown_tests', True),
@@ -186,11 +200,18 @@ class WizardStep6Summary(QWidget):
             profile_path = self.profile_manager.save_profile(profile)
             QMessageBox.information(
                 self,
-                "成功",
-                f"Profile 已保存!\n路径: {profile_path}"
+                UserMessage.format_title(UserMessage.Action.SAVE, UserMessage.Type.SUCCESS),
+                UserMessage.format_success(
+                    "Profile 保存",
+                    f"路径: {profile_path}"
+                )
             )
         except Exception as e:
-            QMessageBox.critical(self, "保存失败", f"无法保存 Profile:\n{str(e)}")
+            QMessageBox.critical(
+                self,
+                UserMessage.format_title(UserMessage.Action.SAVE, UserMessage.Type.ERROR),
+                UserMessage.format_file_error("保存", profile_path, str(e))
+            )
             return
         
         # 完成

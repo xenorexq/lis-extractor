@@ -13,7 +13,7 @@ def main():
     # 设置应用信息
     app.setApplicationName("LIS Extractor")
     app.setOrganizationName("Medical Data Tools")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.1.0")
     
     # 创建并显示主窗口
     window = MainWindow()
